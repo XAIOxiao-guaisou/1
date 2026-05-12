@@ -119,6 +119,8 @@
     }
     function getOrCreateContainer() {
         let c = document.getElementById('gemini-dl-root');
+        // SPA 路由切换会清空 body，旧 root 变孤儿；失联就重建
+        if (c && !c.isConnected) c = null;
         if (!c) {
             c = document.createElement('div'); c.id = 'gemini-dl-root';
             c.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:99999;display:flex;flex-direction:column;gap:15px;max-height:80vh;overflow-y:auto;pointer-events:none;';
@@ -131,7 +133,8 @@
     let isDragging = false;
     let startX, startY, initLeft, initTop;
     function getOrCreateMiniBall() {
-        if (globalMiniBall) return globalMiniBall;
+        // SPA 路由切换会清空 body，旧节点变孤儿；需重建
+        if (globalMiniBall && globalMiniBall.isConnected) return globalMiniBall;
         globalMiniBall = document.createElement('div');
         globalMiniBall.className = 'gemini-dl-miniball';
         globalMiniBall.setAttribute('role', 'button');
@@ -207,8 +210,7 @@
         card.style.cssText = 'background:#1e1e1e;color:#e3e3e3;border:1px solid #444;border-radius:12px;padding:12px;width:340px;box-shadow:0 8px 32px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:10px;font-family:"Google Sans",sans-serif;animation:gFadeIn .3s ease-out; transition: opacity 0.3s, transform 0.3s;';
         const toggleMinimize = (e) => {
             if (e) e.stopPropagation();
-            const root = document.getElementById('gemini-dl-root');
-            if (!root) return;
+            const root = getOrCreateContainer();
             const originalRect = root.getBoundingClientRect();
             root.style.display = 'none';
             const ball = getOrCreateMiniBall();
