@@ -14,13 +14,35 @@
         // 排除这些容器里的图片（头部、侧栏、账号按钮等）
         EXCLUDE_CONTAINERS: 'header,nav,[aria-label*="account" i],[aria-label*="profile" i],[class*="avatar" i],[class*="user-image" i],[class*="profile-picture" i],[class*="user-button" i],[data-test-id*="account" i]'
     };
-    // 开启后会把过滤决策打印到 console，便于定位"为什么没抓到图/为什么抓到头像"。
-    // 生产环境请关闭。可以通过 localStorage.setItem('GEMINI_DL_DEBUG', '1') 动态打开。
+    // 开启后会把过滤决策打印到 console + 左上角浮动面板，便于定位图像捕获问题。
+    // 默认开启；确认修复无误后可设置 localStorage.setItem('GEMINI_DL_DEBUG', '0') 关闭。
     const DEBUG = (() => {
-        try { return localStorage.getItem('GEMINI_DL_DEBUG') === '1'; }
-        catch { return false; }
+        try { return localStorage.getItem('GEMINI_DL_DEBUG') !== '0'; }
+        catch { return true; }
     })();
-    const dlog = DEBUG ? (...args) => console.log('[Gemini-DL]', ...args) : () => {};
+    // 浮动调试面板
+    let debugPanel = null;
+    function getDebugPanel() {
+        if (!DEBUG) return null;
+        if (debugPanel && debugPanel.isConnected) return debugPanel;
+        debugPanel = document.createElement('div');
+        debugPanel.id = 'gemini-dl-debug';
+        debugPanel.style.cssText = 'position:fixed;top:10px;left:10px;z-index:2147483647;background:rgba(0,0,0,0.85);color:#0f0;font:11px/1.4 Consolas,monospace;padding:8px;border-radius:6px;max-width:480px;max-height:280px;overflow-y:auto;pointer-events:auto;border:1px solid #0f0;';
+        debugPanel.innerHTML = '<div style="color:#ff0;font-weight:bold;margin-bottom:4px;">[Gemini-DL DEBUG] 点击可关闭</div>';
+        debugPanel.onclick = () => { debugPanel.remove(); debugPanel = null; };
+        (document.body || document.documentElement).appendChild(debugPanel);
+        return debugPanel;
+    }
+    const dlog = (...args) => {
+        if (!DEBUG) return;
+        console.log('[Gemini-DL]', ...args);
+        const panel = getDebugPanel();
+        if (!panel) return;
+        const line = document.createElement('div');
+        line.textContent = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ').slice(0, 240);
+        panel.appendChild(line);
+        panel.scrollTop = panel.scrollHeight;
+    };
     const IOPAINT_URL = 'http://127.0.0.1:8080';
     const SHARPEN_WORKER_URL = chrome.runtime.getURL('sharpen.worker.js');
 
@@ -542,10 +564,15 @@
         if (!node || processedNodes.has(node)) return;
         const src = node.currentSrc || node.src;
         if (src && src.startsWith('http')) {
+            dlog('queued img:', node.naturalWidth + 'x' + node.naturalHeight, src.slice(-60));
             pendingImages.set(node, src);
             scheduleFlush();
+        } else {
+            dlog('img has no http src yet:', (src || '(empty)').slice(0, 40));
         }
     };
+
+    dlog('content.js v2 loaded at', new Date().toISOString().slice(11, 19));
 
     new MutationObserver(muts => {
         for (const m of muts) m.addedNodes.forEach(n => {
@@ -556,5 +583,7 @@
     }).observe(document.body || document.documentElement, { childList: true, subtree: true });
 
     // document_start 时 body 里可能已有预渲染图片，补扫一次
-    (document.body || document.documentElement).querySelectorAll?.('img').forEach(queueImg);
+    const initialImgs = (document.body || document.documentElement).querySelectorAll?.('img') || [];
+    dlog('initial scan: found', initialImgs.length, 'img elements');
+    initialImgs.forEach(queueImg);
 })();
