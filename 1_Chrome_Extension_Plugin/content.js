@@ -179,13 +179,12 @@
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('mouseup', onMouseUp);
         };
-        globalMiniBall.onclick = (e) => {
+        globalMiniBall.onclick = () => {
             if (isDragging) return;
-            const root = document.getElementById('gemini-dl-root');
-            if (root) {
-                root.style.display = 'flex';
-                setTimeout(() => root.scrollTop = root.scrollHeight, 50);
-            }
+            // 用 getOrCreateContainer 保证 root 一定存在（SPA 切路由后 root 会失联）
+            const root = getOrCreateContainer();
+            root.style.display = 'flex';
+            setTimeout(() => root.scrollTop = root.scrollHeight, 50);
             globalMiniBall.style.display = 'none';
         };
         // 键盘可达：Enter / Space 等价于 click，便于无鼠标场景恢复面板
@@ -211,24 +210,15 @@
         const toggleMinimize = (e) => {
             if (e) e.stopPropagation();
             const root = getOrCreateContainer();
-            const originalRect = root.getBoundingClientRect();
             root.style.display = 'none';
             const ball = getOrCreateMiniBall();
-            ball.style.display = 'flex';
+            // 直接把球放在屏幕右下角，不依赖 root 的 rect（root 可能是空容器导致 rect 为 0）
             ball.style.transition = 'none';
-            ball.style.right = 'auto';
-            ball.style.bottom = 'auto';
-            ball.style.left = `${originalRect.right - 48}px`;
-            ball.style.top = `${originalRect.bottom - 48}px`;
-            setTimeout(() => {
-                const screenW = window.innerWidth;
-                ball.style.transition = 'left 0.3s, top 0.3s';
-                if (ball.getBoundingClientRect().left + 24 > screenW / 2) {
-                    ball.style.left = `${screenW - 48 - 20}px`;
-                } else {
-                    ball.style.left = '20px';
-                }
-            }, 50);
+            ball.style.left = 'auto';
+            ball.style.top = 'auto';
+            ball.style.right = '20px';
+            ball.style.bottom = '20px';
+            ball.style.display = 'flex';
         };
         if (!document.getElementById('gemini-dl-css')) {
             const s = document.createElement('style'); s.id = 'gemini-dl-css';
