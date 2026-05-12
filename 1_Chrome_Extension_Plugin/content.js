@@ -2,38 +2,32 @@
     'use strict';
     const CONFIG = {
         MIN_SIZE: 200,
-        // 生成图路径特征（在这些路径下才是 Gemini 输出图）
-        GEMINI_IMAGE_PATTERNS: [
-            /\/rd-gg\//i,          // Gemini redirect/gateway 出来的图
-            /generativeai/i,        // generativeai.googleusercontent.com
-            /\/proxy\/.*gemini/i    // 其他代理路径含 gemini 关键字
-        ],
-        // 明确要排除的路径（账号头像、UI 图标、广告等）
-        EXCLUDE_PATTERNS: [
-            /^https?:\/\/[^/]*googleusercontent\.com\/a[/-]/i, // 账号头像 /a/ 或 /a-/
+        // 允许来源：生成图和用户上传图都来自这些域名
+        ALLOWED_HOSTS: ['googleusercontent.com', 'gemini.google.com'],
+        // URL 路径级硬排除：明显的非生成图资源
+        EXCLUDE_URL_PATTERNS: [
+            /^https?:\/\/[^/]*googleusercontent\.com\/a[/-]/i, // Google 账号头像 /a/ 或 /a-/
             /gstatic\.com/i,                                   // Google 静态资源
             /googletagmanager|googleadservices|doubleclick/i,  // 广告/分析
-            /\/logo|\/icon|\/avatar/i                          // 通用 UI 资源
-        ]
+            /\/logo|\/favicon|\/avatar/i                       // 通用 UI 资源
+        ],
+        // 排除这些容器里的图片（头部、侧栏、账号按钮等）
+        EXCLUDE_CONTAINERS: 'header,nav,[aria-label*="account" i],[aria-label*="profile" i],[class*="avatar" i],[class*="user-image" i],[class*="profile-picture" i],[class*="user-button" i],[data-test-id*="account" i]'
     };
     const IOPAINT_URL = 'http://127.0.0.1:8080';
     const SHARPEN_WORKER_URL = chrome.runtime.getURL('sharpen.worker.js');
 
-    // 判断一个 URL 是否为 Gemini 生成图：需路径匹配生成特征、且不命中排除规则
-    function isGeminiGeneratedImage(url) {
-        if (CONFIG.EXCLUDE_PATTERNS.some(re => re.test(url))) return false;
-        return CONFIG.GEMINI_IMAGE_PATTERNS.some(re => re.test(url));
+    // 基础域名 + URL 黑名单过滤
+    function isCandidateImageUrl(url) {
+        if (!CONFIG.ALLOWED_HOSTS.some(h => url.includes(h))) return false;
+        if (CONFIG.EXCLUDE_URL_PATTERNS.some(re => re.test(url))) return false;
+        return true;
     }
 
-    // 判断一个 <img> 节点是否在 Gemini 回答消息区域内，排除 header/avatar/sidebar
-    function isInsideMessageArea(node) {
+    // DOM 容器过滤：在排除容器内就拒绝
+    function isInExcludedContainer(node) {
         if (!node || !node.closest) return false;
-        // 如果节点自身带有明显 avatar 类名，直接否决
-        if (node.closest('[class*="avatar" i],[class*="user-image" i],[class*="profile" i],[class*="user-button" i],header,nav')) {
-            return false;
-        }
-        // Gemini 消息卡片常见容器：message-content / response / model-response / conversation
-        return !!node.closest('[class*="message" i],[class*="response" i],[class*="conversation" i],[class*="turn" i],[data-test-id]');
+        return !!node.closest(CONFIG.EXCLUDE_CONTAINERS);
     }
     // 把锐化交给 Worker；创建失败（CSP / 旧内核）时回退主线程
     function sharpenInWorker(imageData, gScale) {
@@ -483,10 +477,10 @@
         if (url.startsWith('blob:') || url.startsWith('data:')) return;
         // 节点级去重：同一个 <img> 元素只处理一次，即使 src 被 Gemini 反复重赋值
         if (node && processedNodes.has(node)) return;
-        // URL 特征过滤：必须是 Gemini 生成图路径
-        if (!isGeminiGeneratedImage(url)) return;
-        // DOM 位置过滤：必须在消息区域内，不是头像/侧栏/logo
-        if (node && !isInsideMessageArea(node)) return;
+        // URL 级过滤：域名白名单 + URL 黑名单
+        if (!isCandidateImageUrl(url)) return;
+        // DOM 容器过滤：头像/侧栏/账号按钮等容器内的图一律跳过
+        if (node && isInExcludedContainer(node)) return;
         const cl = cleanUrl(url);
         if (uploadedSet.has(cl) || processingSet.has(cl)) return;
         processingSet.add(cl);
