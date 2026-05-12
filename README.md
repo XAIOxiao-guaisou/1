@@ -16,7 +16,6 @@ Gemini_Extension_v2.0_Win/
 │   ├── manifest.json
 │   ├── background.js
 │   ├── content.js
-│   ├── inject.js
 │   ├── sharpen.worker.js
 │   ├── popup.html / popup.js
 │   ├── options.html

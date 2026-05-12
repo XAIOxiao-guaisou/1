@@ -1,3 +1,5 @@
+// MV3 service worker：只处理 downloads API，图片 fetch 在 content script 里直接完成
+// （content 页面 origin 能通过 Google CDN 的 CORS；service worker 的 chrome-extension:// origin 会被拒）。
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "download") {
         const filename = request.filename || `Gemini_Downloads/image_${Date.now()}.png`;
@@ -15,29 +17,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 sendResponse({ success: true, id: id });
             }
         });
-        return true;
-    }
-    if (request.action === "fetch_blob") {
-        const urlObj = new URL(request.url);
-        urlObj.searchParams.set("_cb", Date.now());
-        fetch(urlObj.toString(), {
-            method: 'GET',
-            mode: 'cors',
-            cache: 'no-store'
-        })
-            .then(response => {
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                return response.blob();
-            })
-            .then(blob => {
-                const reader = new FileReader();
-                reader.onloadend = () => sendResponse({ success: true, dataUrl: reader.result });
-                reader.onerror = () => sendResponse({ success: false, error: "Failed to read blob" });
-                reader.readAsDataURL(blob);
-            })
-            .catch(error => {
-                sendResponse({ success: false, error: error.message });
-            });
         return true;
     }
 });

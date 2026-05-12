@@ -98,6 +98,21 @@
             chrome.runtime.sendMessage(msg, r => chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(r));
         });
     }
+    // 在 content script 内直接拉取图片：origin 为 https://gemini.google.com，能通过 Google CDN 的 CORS。
+    // 走 background 的 MV3 service worker 会以 chrome-extension:// 为 origin，CDN 拒绝。
+    async function fetchImageAsDataUrl(url) {
+        const u = new URL(url);
+        u.searchParams.set('_cb', Date.now());
+        const resp = await fetch(u.toString(), { method: 'GET', mode: 'cors', cache: 'no-store' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        return await new Promise((res, rej) => {
+            const reader = new FileReader();
+            reader.onloadend = () => res(reader.result);
+            reader.onerror = () => rej(new Error('Failed to read blob'));
+            reader.readAsDataURL(blob);
+        });
+    }
     function removeAllWrappers() {
         document.querySelectorAll('.gemini-dl-wrapper').forEach(w => w.remove());
         document.querySelectorAll('.gemini-dl-miniball').forEach(b => b.remove());
@@ -307,9 +322,8 @@
                 btnOK.textContent = '正在重构...'; btnOK.disabled = true;
             }
             try {
-                const resp = await safeSend({ action: 'fetch_blob', url: downloadUrl });
-                if (!resp?.success) throw new Error('fetch failed');
-                const img = new Image(); img.src = resp.dataUrl;
+                const dataUrl = await fetchImageAsDataUrl(downloadUrl);
+                const img = new Image(); img.src = dataUrl;
                 await new Promise(r => img.onload = r);
                 const s = await new Promise(r => chrome.storage.sync.get({ cutRight: 83, cutBottom: 83 }, r));
                 const gScale = parseFloat(selScale) || 1;
@@ -441,8 +455,10 @@
         wrapper.appendChild(card);
         container.appendChild(wrapper);
     }
-    async function processImage(url) {
+    async function processImage(url, node) {
         if (url.startsWith('blob:') || url.startsWith('data:')) return;
+        // 节点级去重：同一个 <img> 元素只处理一次，即使 src 被 Gemini 反复重赋值
+        if (node && processedNodes.has(node)) return;
         const cl = cleanUrl(url);
         if (uploadedSet.has(cl) || processingSet.has(cl)) return;
         processingSet.add(cl);
@@ -459,16 +475,17 @@
                 if (w < CONFIG.MIN_SIZE) { uploadedSet.add(cl); processingSet.delete(cl); return; }
             } catch { /* 尺寸探测失败时仍允许继续，按未知尺寸处理 */ }
             uploadedSet.add(cl); processingSet.delete(cl);
+            if (node) processedNodes.add(node);
             await showDownloadPrompt(url, buildHiResUrl(cl), getFileName(w, h));
         } catch { processingSet.delete(cl); }
     }
-    const sc = document.createElement('script'); sc.src = chrome.runtime.getURL('inject.js');
-    sc.onload = () => sc.remove();
-    (document.head || document.documentElement).appendChild(sc);
-    document.addEventListener('GeminiImageInterceptor', e => { if (e.detail?.url) processImage(e.detail.url); });
+
+    // 节点级去重集合：即使同一张图的 URL 因重定向/token 变化被 Gemini React 多次重新挂载，
+    // 同一个 <img> DOM 节点只会被处理一次。WeakSet 避免内存泄漏（节点被 GC 时自动清理）。
+    const processedNodes = new WeakSet();
 
     // MutationObserver 批处理：Gemini 聊天流 DOM 变化频繁，累积后在空闲帧统一处理，降低主线程抖动。
-    const pendingImages = new Set();
+    const pendingImages = new Map();  // node -> src
     const scheduleFlush = (() => {
         let scheduled = false;
         const schedule = window.requestIdleCallback
@@ -479,15 +496,17 @@
             scheduled = true;
             schedule(() => {
                 scheduled = false;
-                const urls = Array.from(pendingImages);
+                const entries = Array.from(pendingImages.entries());
                 pendingImages.clear();
-                urls.forEach(u => processImage(u));
+                entries.forEach(([node, src]) => processImage(src, node));
             });
         };
     })();
-    const queueImg = (src) => {
+    const queueImg = (node) => {
+        if (!node || processedNodes.has(node)) return;
+        const src = node.currentSrc || node.src;
         if (src && src.startsWith('http')) {
-            pendingImages.add(src);
+            pendingImages.set(node, src);
             scheduleFlush();
         }
     };
@@ -495,8 +514,11 @@
     new MutationObserver(muts => {
         for (const m of muts) m.addedNodes.forEach(n => {
             if (n.nodeType !== 1) return;
-            if (n.tagName === 'IMG') queueImg(n.src);
-            else n.querySelectorAll?.('img').forEach(i => queueImg(i.src));
+            if (n.tagName === 'IMG') queueImg(n);
+            else n.querySelectorAll?.('img').forEach(queueImg);
         });
     }).observe(document.body || document.documentElement, { childList: true, subtree: true });
+
+    // document_start 时 body 里可能已有预渲染图片，补扫一次
+    (document.body || document.documentElement).querySelectorAll?.('img').forEach(queueImg);
 })();

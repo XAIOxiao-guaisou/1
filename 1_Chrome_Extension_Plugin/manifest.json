@@ -47,7 +47,6 @@
     "web_accessible_resources": [
         {
             "resources": [
-                "inject.js",
                 "sharpen.worker.js",
                 "icons/*"
             ],
