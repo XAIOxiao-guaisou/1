@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Antigravity V1.8 - Settings</title>
+    <style>
+        body {
+            font-family: 'Google Sans', sans-serif;
+            padding: 30px;
+            background: #202124;
+            color: #e8eaed;
+        }
+
+        .container {
+            max-width: 460px;
+            background: #292a2d;
+            padding: 25px;
+            border-radius: 12px;
+            border: 1px solid #3c4043;
+        }
+
+        h2 {
+            margin-top: 0;
+            color: #8ab4f8;
+            border-bottom: 1px solid #3c4043;
+            padding-bottom: 10px;
+        }
+
+        .item {
+            margin-bottom: 18px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 14px;
+            color: #9aa0a6;
+        }
+
+        .desc {
+            font-size: 11px;
+            color: #5f6368;
+            margin-top: 4px;
+            line-height: 1.5;
+        }
+
+        input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            background: #3c4043;
+            border: 1px solid #5f6368;
+            border-radius: 6px;
+            color: white;
+            box-sizing: border-box;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #8ab4f8;
+            color: #202124;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        button:hover {
+            background: #aecbfa;
+        }
+
+        .sep {
+            color: #5f6368;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 18px 0 12px;
+            border-bottom: 1px solid #3c4043;
+            padding-bottom: 6px;
+        }
+
+        .info {
+            background: #1a3a5c;
+            border-left: 3px solid #8ab4f8;
+            padding: 10px 14px;
+            border-radius: 0 6px 6px 0;
+            font-size: 11px;
+            color: #aecbfa;
+            margin-bottom: 18px;
+            line-height: 1.7;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h2>⚙️ Antigravity V1.8 设置</h2>
+
+        <div class="info">
+            💡 <b>像素穿透模式</b>使用<b>固定圆形掩码</b>精确定位 Gemini 水印。<br>
+            圆心 = 距右边 cutRight/2，距下边 cutBottom/2；半径 = min(cutRight, cutBottom)/2。<br>
+            如水印超出圆圈，请适当增大数值；如圆圈误覆盖图像内容，请减小数值。
+        </div>
+
+        <div class="sep">水印圆形定位参数</div>
+
+        <div class="item">
+            <label>右侧偏移 cutRight（像素）</label>
+            <input type="number" id="cutRight" value="83" min="20" max="300">
+            <p class="desc">Gemini 水印包围盒宽度。圆心距图片右边缘 = cutRight / 2。默认 83px。</p>
+        </div>
+        <div class="item">
+            <label>底部偏移 cutBottom（像素）</label>
+            <input type="number" id="cutBottom" value="83" min="20" max="300">
+            <p class="desc">Gemini 水印包围盒高度。圆心距图片下边缘 = cutBottom / 2。默认 83px。</p>
+        </div>
+
+        <button id="save">💾 保存并应用</button>
+    </div>
+    <script>
+        chrome.storage.sync.get({ cutRight: 83, cutBottom: 83 }, s => {
+            document.getElementById('cutRight').value = s.cutRight;
+            document.getElementById('cutBottom').value = s.cutBottom;
+        });
+        document.getElementById('save').addEventListener('click', () => {
+            const cutRight = parseInt(document.getElementById('cutRight').value) || 83;
+            const cutBottom = parseInt(document.getElementById('cutBottom').value) || 83;
+            chrome.storage.sync.set({ cutRight, cutBottom }, () => {
+                const btn = document.getElementById('save');
+                btn.textContent = '✅ 已保存！';
+                setTimeout(() => btn.textContent = '💾 保存并应用', 1500);
+            });
+        });
+    </script>
+</body>
+
+</html>

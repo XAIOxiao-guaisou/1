@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Gemini 助手</title>
+    <style>
+        body {
+            width: 260px;
+            margin: 0;
+            padding: 14px;
+            background: #1e1e1e;
+            color: #e8eaed;
+            font-family: "Google Sans", system-ui, sans-serif;
+            font-size: 13px;
+        }
+
+        h3 {
+            margin: 0 0 10px;
+            font-size: 14px;
+            color: #8ab4f8;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            background: #292a2d;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #9aa0a6;
+            flex-shrink: 0;
+        }
+
+        .dot.on {
+            background: #34a853;
+        }
+
+        .dot.off {
+            background: #e57373;
+        }
+
+        .tip {
+            font-size: 11px;
+            color: #9aa0a6;
+            line-height: 1.5;
+            margin: 4px 0 10px;
+        }
+
+        button {
+            width: 100%;
+            padding: 8px;
+            margin-top: 6px;
+            background: #8ab4f8;
+            color: #202124;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        button.ghost {
+            background: transparent;
+            color: #aecbfa;
+            border: 1px solid #3c4043;
+        }
+
+        button:hover {
+            filter: brightness(1.1);
+        }
+    </style>
+</head>
+
+<body>
+    <h3>Gemini 助手控制面板</h3>
+
+    <div class="status">
+        <div id="dot" class="dot"></div>
+        <div id="statusText">检测 AI 后端中...</div>
+    </div>
+
+    <div class="tip" id="tip">
+        打开 gemini.google.com 即可自动触发图片处理工作台。
+    </div>
+
+    <button id="openOptions">⚙️ 打开设置</button>
+    <button id="openGemini" class="ghost">🚀 打开 Gemini</button>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>

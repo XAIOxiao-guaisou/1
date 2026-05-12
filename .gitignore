@@ -1,0 +1,50 @@
+# ===== 便携 Python 解释器（超过 GitHub 100MB 限制）=====
+# 用户首次使用时通过 install.bat 或手动解压获得
+2_Python_AI_Backend/python/
+
+# ===== 模型权重与缓存 =====
+# LaMa 权重 (best.ckpt ~390MB, big-lama.zip ~364MB)
+# 首次启动时由 lama_server.py 自动下载
+2_Python_AI_Backend/models/lama_server/
+
+# ===== Python 运行时产物 =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# ===== 训练/实验产物（advimman_lama_main 用，不会进入 git 但仍忽略防万一）=====
+*.ckpt
+*.pth
+*.pt
+outputs/
+experiments/
+logs/
+wandb/
+lightning_logs/
+
+# ===== 操作系统 / IDE =====
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
+
+# ===== 环境 =====
+.env
+.env.local
+venv/
+env/
+.venv/
+
+# ===== Node / 浏览器扩展打包产物 =====
+node_modules/
+dist/
+*.zip
+*.crx

@@ -1,0 +1,59 @@
+{
+    "manifest_version": 3,
+    "name": "Gemini Image Downloader Pro",
+    "version": "1.8",
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    },
+    "action": {
+        "default_title": "Antigravity 引擎控制中心",
+        "default_popup": "popup.html",
+        "default_icon": {
+            "16": "icons/icon16.png",
+            "48": "icons/icon48.png",
+            "128": "icons/icon128.png"
+        }
+    },
+    "description": "Provide dual-engine watermark handling: Pixel Penetration or Composition Cropping.",
+    "permissions": [
+        "downloads",
+        "storage"
+    ],
+    "options_ui": {
+        "page": "options.html",
+        "open_in_tab": true
+    },
+    "host_permissions": [
+        "https://gemini.google.com/*",
+        "https://*.googleusercontent.com/*",
+        "http://127.0.0.1:8080/*"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://gemini.google.com/*"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_start"
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "inject.js",
+                "sharpen.worker.js",
+                "icons/*"
+            ],
+            "matches": [
+                "https://gemini.google.com/*"
+            ]
+        }
+    ]
+}
