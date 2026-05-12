@@ -2,18 +2,13 @@
     'use strict';
     const CONFIG = {
         MIN_SIZE: 200,
-        // 允许来源：生成图和用户上传图都来自这些域名
-        ALLOWED_HOSTS: ['googleusercontent.com', 'gemini.google.com'],
-        // URL 路径级硬排除：明显的非生成图资源
-        EXCLUDE_URL_PATTERNS: [
-            // Google 账号头像 /a/ 或 /a-/；必须小写，不加 /i —— Gemini 生成图路径以大写 A 开头
-            /^https?:\/\/[^/]*googleusercontent\.com\/a[/-]/,
-            /gstatic\.com/i,                                   // Google 静态资源
-            /googletagmanager|googleadservices|doubleclick/i,  // 广告/分析
-            /\/logo|\/favicon|\/avatar/i                       // 通用 UI 资源
-        ],
-        // 排除这些容器里的图片（头部、侧栏、账号按钮等）
-        EXCLUDE_CONTAINERS: 'header,nav,[aria-label*="account" i],[aria-label*="profile" i],[class*="avatar" i],[class*="user-image" i],[class*="profile-picture" i],[class*="user-button" i],[data-test-id*="account" i]'
+        // 白名单容器：Gemini Angular 组件，只有在这些里面的图才是对话生成/引用图
+        // <message-content> 是对话气泡内容、<model-response>/<user-query> 是角色标签
+        ALLOWED_CONTAINERS: 'message-content,model-response,user-query,[class*="message-content" i]',
+        // 允许的 URL scheme：Gemini 用 blob: URL 渲染生成图；直链也接受
+        ALLOWED_SCHEMES: ['blob:', 'http:', 'https:'],
+        // 明确拒绝的容器（避免白名单疏漏，双重保险）
+        EXCLUDE_CONTAINERS: 'header,nav,[aria-label*="account" i],[class*="avatar" i],[class*="user-image" i],[class*="profile-picture" i],[class*="user-button" i]'
     };
     // 开启后会把过滤决策打印到 console + 左上角浮动面板，便于定位图像捕获问题。
     // 默认开启；确认修复无误后可设置 localStorage.setItem('GEMINI_DL_DEBUG', '0') 关闭。
@@ -47,14 +42,18 @@
     const IOPAINT_URL = 'http://127.0.0.1:8080';
     const SHARPEN_WORKER_URL = chrome.runtime.getURL('sharpen.worker.js');
 
-    // 基础域名 + URL 黑名单过滤
-    function isCandidateImageUrl(url) {
-        if (!CONFIG.ALLOWED_HOSTS.some(h => url.includes(h))) return false;
-        if (CONFIG.EXCLUDE_URL_PATTERNS.some(re => re.test(url))) return false;
-        return true;
+    // URL scheme 检查（blob/http/https 都允许；data: 等拒绝）
+    function isAllowedScheme(url) {
+        return CONFIG.ALLOWED_SCHEMES.some(s => url.startsWith(s));
     }
 
-    // DOM 容器过滤：在排除容器内就拒绝
+    // DOM 白名单：必须在 Gemini 对话消息容器内
+    function isInAllowedContainer(node) {
+        if (!node || !node.closest) return false;
+        return !!node.closest(CONFIG.ALLOWED_CONTAINERS);
+    }
+
+    // DOM 黑名单：即使在消息容器内，也排除头像/账号按钮等明显非生成图元素
     function isInExcludedContainer(node) {
         if (!node || !node.closest) return false;
         return !!node.closest(CONFIG.EXCLUDE_CONTAINERS);
@@ -157,9 +156,16 @@
     // 在 content script 内直接拉取图片：origin 为 https://gemini.google.com，能通过 Google CDN 的 CORS。
     // 走 background 的 MV3 service worker 会以 chrome-extension:// 为 origin，CDN 拒绝。
     async function fetchImageAsDataUrl(url) {
-        const u = new URL(url);
-        u.searchParams.set('_cb', Date.now());
-        const resp = await fetch(u.toString(), { method: 'GET', mode: 'cors', cache: 'no-store' });
+        // blob URL 不能 URL 操作；直接 fetch
+        let fetchUrl;
+        if (url.startsWith('blob:')) {
+            fetchUrl = url;
+        } else {
+            const u = new URL(url);
+            u.searchParams.set('_cb', Date.now());
+            fetchUrl = u.toString();
+        }
+        const resp = await fetch(fetchUrl, { method: 'GET', mode: 'cors', cache: 'no-store' });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const blob = await resp.blob();
         return await new Promise((res, rej) => {
@@ -504,38 +510,53 @@
         container.appendChild(wrapper);
     }
     async function processImage(url, node) {
-        if (url.startsWith('blob:') || url.startsWith('data:')) { dlog('skip: data/blob url', url.slice(0, 40)); return; }
+        // scheme 检查：允许 blob: / http: / https:
+        if (!isAllowedScheme(url)) { dlog('skip: bad scheme', url.slice(0, 40)); return; }
         // 节点级去重：同一个 <img> 元素只处理一次，即使 src 被 Gemini 反复重赋值
-        if (node && processedNodes.has(node)) { dlog('skip: node processed', url.slice(-40)); return; }
-        // URL 级过滤：域名白名单 + URL 黑名单
-        if (!isCandidateImageUrl(url)) { dlog('skip: url not candidate', url.slice(0, 80)); return; }
-        // DOM 容器过滤：头像/侧栏/账号按钮等容器内的图一律跳过
-        if (node && isInExcludedContainer(node)) {
-            dlog('skip: in excluded container', node.closest(CONFIG.EXCLUDE_CONTAINERS)?.tagName, url.slice(-40));
+        if (node && processedNodes.has(node)) { dlog('skip: node processed'); return; }
+        // 白名单容器：必须在 Gemini 对话消息容器内（如 <message-content>）
+        if (!node || !isInAllowedContainer(node)) {
+            dlog('skip: not in allowed container', node?.parentElement?.tagName);
             return;
         }
-        const cl = cleanUrl(url);
-        if (uploadedSet.has(cl) || processingSet.has(cl)) { dlog('skip: already uploaded/processing', cl.slice(-40)); return; }
+        // 黑名单容器：双重保险，排除容器内的头像/账号按钮
+        if (isInExcludedContainer(node)) { dlog('skip: in excluded container'); return; }
+        // 去重 key：blob URL 每次不同，按节点去重已足够；非 blob 仍用 cleanUrl
+        const cl = url.startsWith('blob:') ? url : cleanUrl(url);
+        if (uploadedSet.has(cl) || processingSet.has(cl)) { dlog('skip: already uploaded/processing'); return; }
         processingSet.add(cl);
-        dlog('accepted, probing size:', url.slice(-60));
+        dlog('accepted, probing size:', (node.naturalWidth || '?') + 'x' + (node.naturalHeight || '?'), url.slice(-40));
         try {
-            let w = 0, h = 0;
-            try {
-                const img = new Image(); img.src = url;
-                await new Promise((res, rej) => {
-                    img.onload = () => { w = img.naturalWidth; h = img.naturalHeight; res(); };
-                    img.onerror = () => rej();
-                    setTimeout(() => rej(), 5000);
-                });
-                if (w < CONFIG.MIN_SIZE) {
-                    dlog('skip: too small', w, 'x', h, url.slice(-40));
-                    uploadedSet.add(cl); processingSet.delete(cl); return;
-                }
-            } catch { /* 尺寸探测失败时仍允许继续，按未知尺寸处理 */ }
+            let w = node.naturalWidth || 0;
+            let h = node.naturalHeight || 0;
+            // 节点尺寸为 0 说明还没解码完；等一下再读
+            if (!w || !h) {
+                try {
+                    await new Promise((res, rej) => {
+                        const onLoad = () => { w = node.naturalWidth; h = node.naturalHeight; cleanup(); res(); };
+                        const onErr  = () => { cleanup(); rej(new Error('img load failed')); };
+                        const timer  = setTimeout(() => { cleanup(); rej(new Error('timeout')); }, 5000);
+                        const cleanup = () => {
+                            node.removeEventListener('load', onLoad);
+                            node.removeEventListener('error', onErr);
+                            clearTimeout(timer);
+                        };
+                        if (node.complete && node.naturalWidth) { onLoad(); return; }
+                        node.addEventListener('load', onLoad);
+                        node.addEventListener('error', onErr);
+                    });
+                } catch { /* 探测失败按未知尺寸处理 */ }
+            }
+            if (w && w < CONFIG.MIN_SIZE) {
+                dlog('skip: too small', w, 'x', h, url.slice(-40));
+                uploadedSet.add(cl); processingSet.delete(cl); return;
+            }
             uploadedSet.add(cl); processingSet.delete(cl);
             if (node) processedNodes.add(node);
             dlog('✓ opening panel for', w, 'x', h, url.slice(-60));
-            await showDownloadPrompt(url, buildHiResUrl(cl), getFileName(w, h));
+            // blob URL 直接用原图；普通 URL 走 =s4096 拿高分辨率
+            const downloadUrl = url.startsWith('blob:') ? url : buildHiResUrl(cl);
+            await showDownloadPrompt(url, downloadUrl, getFileName(w, h));
         } catch { processingSet.delete(cl); }
     }
 
