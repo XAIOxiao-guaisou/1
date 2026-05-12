@@ -6,7 +6,8 @@
         ALLOWED_HOSTS: ['googleusercontent.com', 'gemini.google.com'],
         // URL 路径级硬排除：明显的非生成图资源
         EXCLUDE_URL_PATTERNS: [
-            /^https?:\/\/[^/]*googleusercontent\.com\/a[/-]/i, // Google 账号头像 /a/ 或 /a-/
+            // Google 账号头像 /a/ 或 /a-/；必须小写，不加 /i —— Gemini 生成图路径以大写 A 开头
+            /^https?:\/\/[^/]*googleusercontent\.com\/a[/-]/,
             /gstatic\.com/i,                                   // Google 静态资源
             /googletagmanager|googleadservices|doubleclick/i,  // 广告/分析
             /\/logo|\/favicon|\/avatar/i                       // 通用 UI 资源
