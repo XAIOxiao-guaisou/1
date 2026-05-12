@@ -14,6 +14,13 @@
         // 排除这些容器里的图片（头部、侧栏、账号按钮等）
         EXCLUDE_CONTAINERS: 'header,nav,[aria-label*="account" i],[aria-label*="profile" i],[class*="avatar" i],[class*="user-image" i],[class*="profile-picture" i],[class*="user-button" i],[data-test-id*="account" i]'
     };
+    // 开启后会把过滤决策打印到 console，便于定位"为什么没抓到图/为什么抓到头像"。
+    // 生产环境请关闭。可以通过 localStorage.setItem('GEMINI_DL_DEBUG', '1') 动态打开。
+    const DEBUG = (() => {
+        try { return localStorage.getItem('GEMINI_DL_DEBUG') === '1'; }
+        catch { return false; }
+    })();
+    const dlog = DEBUG ? (...args) => console.log('[Gemini-DL]', ...args) : () => {};
     const IOPAINT_URL = 'http://127.0.0.1:8080';
     const SHARPEN_WORKER_URL = chrome.runtime.getURL('sharpen.worker.js');
 
@@ -474,16 +481,20 @@
         container.appendChild(wrapper);
     }
     async function processImage(url, node) {
-        if (url.startsWith('blob:') || url.startsWith('data:')) return;
+        if (url.startsWith('blob:') || url.startsWith('data:')) { dlog('skip: data/blob url', url.slice(0, 40)); return; }
         // 节点级去重：同一个 <img> 元素只处理一次，即使 src 被 Gemini 反复重赋值
-        if (node && processedNodes.has(node)) return;
+        if (node && processedNodes.has(node)) { dlog('skip: node processed', url.slice(-40)); return; }
         // URL 级过滤：域名白名单 + URL 黑名单
-        if (!isCandidateImageUrl(url)) return;
+        if (!isCandidateImageUrl(url)) { dlog('skip: url not candidate', url.slice(0, 80)); return; }
         // DOM 容器过滤：头像/侧栏/账号按钮等容器内的图一律跳过
-        if (node && isInExcludedContainer(node)) return;
+        if (node && isInExcludedContainer(node)) {
+            dlog('skip: in excluded container', node.closest(CONFIG.EXCLUDE_CONTAINERS)?.tagName, url.slice(-40));
+            return;
+        }
         const cl = cleanUrl(url);
-        if (uploadedSet.has(cl) || processingSet.has(cl)) return;
+        if (uploadedSet.has(cl) || processingSet.has(cl)) { dlog('skip: already uploaded/processing', cl.slice(-40)); return; }
         processingSet.add(cl);
+        dlog('accepted, probing size:', url.slice(-60));
         try {
             let w = 0, h = 0;
             try {
@@ -493,10 +504,14 @@
                     img.onerror = () => rej();
                     setTimeout(() => rej(), 5000);
                 });
-                if (w < CONFIG.MIN_SIZE) { uploadedSet.add(cl); processingSet.delete(cl); return; }
+                if (w < CONFIG.MIN_SIZE) {
+                    dlog('skip: too small', w, 'x', h, url.slice(-40));
+                    uploadedSet.add(cl); processingSet.delete(cl); return;
+                }
             } catch { /* 尺寸探测失败时仍允许继续，按未知尺寸处理 */ }
             uploadedSet.add(cl); processingSet.delete(cl);
             if (node) processedNodes.add(node);
+            dlog('✓ opening panel for', w, 'x', h, url.slice(-60));
             await showDownloadPrompt(url, buildHiResUrl(cl), getFileName(w, h));
         } catch { processingSet.delete(cl); }
     }
