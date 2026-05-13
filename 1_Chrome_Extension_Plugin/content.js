@@ -143,6 +143,59 @@
         cy: imgH - ch / 2,
         r:  Math.min(cw, ch) / 2
     });
+
+    // 自动检测右下角星标水印的圆形包围（白色/浅色 logo），失败返回 null
+    // 思路：
+    //   1. 在 [imgW-cwMax, imgW] × [imgH-chMax, imgH] 的 ROI 内采样像素
+    //   2. 选高亮度（Y > threshold）且低饱和度（R≈G≈B）的像素作为 logo 候选
+    //   3. 用候选点的坐标求中位数（稳健）得到圆心
+    //   4. 用候选点到圆心的距离的 95 分位作为半径
+    //   5. 数量太少或散布太乱则判定为无水印，返回 null
+    function autoDetectWatermark(canvas, ctx, cwMax, chMax) {
+        const imgW = canvas.width, imgH = canvas.height;
+        const roiX = Math.max(0, imgW - cwMax);
+        const roiY = Math.max(0, imgH - chMax);
+        const roiW = imgW - roiX;
+        const roiH = imgH - roiY;
+        if (roiW < 8 || roiH < 8) return null;
+        const data = ctx.getImageData(roiX, roiY, roiW, roiH).data;
+        const xs = [], ys = [];
+        // 亮度阈值：Gemini 星标为亮白色，Y ≈ 230+；容差给到 210 扩大召回
+        const LUMA_THRESHOLD = 210;
+        const CHROMA_TOLERANCE = 30; // 彩色像素（max-min）应 < 30 才算"近灰色"
+        for (let y = 0; y < roiH; y++) {
+            for (let x = 0; x < roiW; x++) {
+                const p = (y * roiW + x) * 4;
+                const r = data[p], g = data[p + 1], b = data[p + 2];
+                const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+                if (luma < LUMA_THRESHOLD) continue;
+                const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+                if (chroma > CHROMA_TOLERANCE) continue;
+                xs.push(roiX + x);
+                ys.push(roiY + y);
+            }
+        }
+        // 样本数太少，无法判定为水印
+        if (xs.length < 50) return null;
+        // 样本数过多（几乎整块都亮），疑似天空/背景误判，放弃
+        if (xs.length > roiW * roiH * 0.6) return null;
+        // 中位数圆心
+        xs.sort((a, b) => a - b);
+        ys.sort((a, b) => a - b);
+        const cx = xs[Math.floor(xs.length / 2)];
+        const cy = ys[Math.floor(ys.length / 2)];
+        // 95 分位距离作半径，避免单个孤立亮点把圆扯大
+        const dists = [];
+        for (let i = 0; i < xs.length; i++) {
+            const dx = xs[i] - cx, dy = ys[i] - cy;
+            dists.push(Math.sqrt(dx * dx + dy * dy));
+        }
+        dists.sort((a, b) => a - b);
+        const r = dists[Math.floor(dists.length * 0.95)] + 2; // +2 补一点边缘
+        // 合理性校验：半径不应大于 ROI 的一半
+        if (r * 2 > Math.min(roiW, roiH)) return null;
+        return { cx, cy, r, samples: xs.length };
+    }
     const getFileName = (w, h) => {
         downloadCount++;
         return `Gemini_Image_${downloadCount.toString().padStart(3, '0')}_${w}x${h}_${Date.now()}.png`;
@@ -404,8 +457,17 @@
                 } else if (selMode === 'ai') {
                     btnOK.textContent = '🤖 AI推理准备中...';
                     safeW = imgW; safeH = imgH;
-                    // 与 options.html 文档保持一致：水印圆心/半径由 cutRight、cutBottom 唯一决定。
-                    const { cx, cy, r: R } = computeWatermarkCircle(imgW, imgH, cw, ch);
+                    // 优先自动定位：在 (cw, ch) 配置范围内寻找星标；失败回退到手动配置
+                    const auto = autoDetectWatermark(bc, bCtx, cw, ch);
+                    let cx, cy, R;
+                    if (auto) {
+                        cx = auto.cx; cy = auto.cy; R = auto.r;
+                        dlog('auto-detected watermark:', auto.cx, auto.cy, 'r=', auto.r, 'samples=', auto.samples);
+                    } else {
+                        const fallback = computeWatermarkCircle(imgW, imgH, cw, ch);
+                        cx = fallback.cx; cy = fallback.cy; R = fallback.r;
+                        dlog('auto-detect failed, using manual circle', cx, cy, 'r=', R);
+                    }
                     const padding = Math.round(64 * gScale);
                     const patchX = Math.max(0, Math.floor(cx - R - padding));
                     const patchY = Math.max(0, Math.floor(cy - R - padding));
