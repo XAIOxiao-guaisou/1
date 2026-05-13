@@ -585,24 +585,38 @@
     const queueImg = (node) => {
         if (!node || processedNodes.has(node)) return;
         const src = node.currentSrc || node.src;
-        if (src && src.startsWith('http')) {
-            dlog('queued img:', node.naturalWidth + 'x' + node.naturalHeight, src.slice(-60));
+        // Gemini 生成图是 blob: 开头，其他图才是 http(s):
+        if (src && (src.startsWith('http') || src.startsWith('blob:'))) {
+            dlog('queued img:', (node.naturalWidth || '?') + 'x' + (node.naturalHeight || '?'), src.slice(-60));
             pendingImages.set(node, src);
             scheduleFlush();
         } else {
-            dlog('img has no http src yet:', (src || '(empty)').slice(0, 40));
+            dlog('img has no usable src yet:', (src || '(empty)').slice(0, 40));
         }
     };
 
     dlog('content.js v2 loaded at', new Date().toISOString().slice(11, 19));
 
+    // 主 Observer：节点新增 + 属性变化（Gemini 异步填 src，必须监听 attributes）
     new MutationObserver(muts => {
-        for (const m of muts) m.addedNodes.forEach(n => {
-            if (n.nodeType !== 1) return;
-            if (n.tagName === 'IMG') queueImg(n);
-            else n.querySelectorAll?.('img').forEach(queueImg);
-        });
-    }).observe(document.body || document.documentElement, { childList: true, subtree: true });
+        for (const m of muts) {
+            if (m.type === 'attributes') {
+                // src 被赋值时再次入队这个节点
+                if (m.target.tagName === 'IMG') queueImg(m.target);
+                continue;
+            }
+            m.addedNodes.forEach(n => {
+                if (n.nodeType !== 1) return;
+                if (n.tagName === 'IMG') queueImg(n);
+                else n.querySelectorAll?.('img').forEach(queueImg);
+            });
+        }
+    }).observe(document.body || document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['src']
+    });
 
     // document_start 时 body 里可能已有预渲染图片，补扫一次
     const initialImgs = (document.body || document.documentElement).querySelectorAll?.('img') || [];
