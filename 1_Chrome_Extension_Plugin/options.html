@@ -118,7 +118,31 @@
         </div>
 
         <button id="save">💾 保存并应用</button>
+
+        <div class="sep">反向 Alpha 水印模板（推荐）</div>
+        <div class="info">
+            🎯 <b>反向 Alpha 混合</b>是代数级精确的水印擦除方法：拿一张纯色背景（最好纯黑）的 Gemini 生成图校准一次，
+            之后所有图片都能在 100ms 内无损去除水印，连水印底下的色彩都能还原。<br>
+            比 AI 补全（LaMa）更快、更准。
+        </div>
+
+        <div class="item">
+            <label>上传校准图（Gemini 生成，纯黑/纯色背景，带水印）</label>
+            <input type="file" id="calibFile" accept="image/png,image/jpeg,image/webp" style="padding:6px;background:#3c4043;border:1px solid #5f6368;border-radius:6px;color:#e8eaed;width:100%;box-sizing:border-box;">
+            <p class="desc">提示：让 Gemini 画一张"纯黑背景"的图，右键另存为，然后上传。</p>
+        </div>
+
+        <button id="calibrate" style="margin-top:8px;">🧪 从图片校准水印模板</button>
+
+        <div id="calibStatus" style="font-size:11px;color:#9aa0a6;margin-top:10px;padding:8px;background:#1a1a1a;border-radius:6px;min-height:16px;">
+            尚未校准。当前 AI 修复模式仍使用 LaMa 补全。
+        </div>
+
+        <canvas id="calibPreview" style="margin-top:10px;max-width:100%;display:none;background:#000;border:1px solid #3c4043;border-radius:6px;"></canvas>
+
+        <button id="clearTemplate" style="margin-top:8px;background:transparent;color:#e57373;border:1px solid #5f6368;">🗑️ 清除已校准模板</button>
     </div>
+    <script src="reverseAlpha.js"></script>
     <script src="options.js"></script>
 </body>
 

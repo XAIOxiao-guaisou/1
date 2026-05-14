@@ -379,6 +379,30 @@
                 c.style.color = isAi ? '#fff' : '#aaa';
             });
         };
+        // 反向 Alpha 模式：只有当 chrome.storage.local 里存在已校准模板才可用
+        const raLabel = document.createElement('span');
+        raLabel.dataset.val = 'reverseAlpha';
+        raLabel.textContent = '🎯 反向 Alpha …';
+        raLabel.style.cssText = 'padding:4px 9px;border-radius:4px;cursor:pointer;font-size:12px;transition:.2s;flex:1;text-align:center;background:#3c4043;color:#aaa;';
+        chrome.storage.local.get('reverseAlphaTemplate', res => {
+            const ready = !!res.reverseAlphaTemplate;
+            raLabel.textContent = ready ? '🎯 反向 Alpha (代数级)' : '🎯 反向 Alpha (未校准)';
+            if (!ready) {
+                raLabel.title = '请先打开扩展设置页，上传一张 Gemini 生成的纯色背景带水印图进行校准';
+                raLabel.style.opacity = '0.55';
+                raLabel.style.cursor = 'not-allowed';
+            }
+            raLabel.onclick = () => {
+                if (!ready) return;
+                selMode = 'reverseAlpha';
+                Array.from(mRow.children).forEach(c => {
+                    const isMe = c === raLabel;
+                    c.style.background = isMe ? '#9c27b0' : '#3c4043';
+                    c.style.color = isMe ? '#fff' : '#aaa';
+                });
+            };
+        });
+        mRow.appendChild(raLabel);
         const rRow = mkRow([{ label: '原图', val: 'none' }, { label: '1:1', val: '1' }, { label: '3:4', val: '0.75' }, { label: '4:3', val: '1.33' }, { label: '16:9', val: '1.7777' }], (v, r) => { selRatio = v; hl(r, v, '#1a73e8'); });
         const scaleRow = mkRow([{ label: '1x 标清', val: '1' }, { label: '2x 高清', val: '2' }, { label: '4x 超清', val: '4' }], (v, r) => { selScale = v; hl(r, v, '#e91e63'); });
         const aRow = mkRow([{ label: '中心', val: 'center' }, { label: '顶', val: 'top' }, { label: '底', val: 'bottom' }, { label: '左', val: 'left' }, { label: '右', val: 'right' }], (v, r) => { selAnchor = v; hl(r, v, '#34a853'); });
@@ -454,6 +478,19 @@
                 let safeW = imgW, safeH = imgH;
                 if (selMode === 'crop') {
                     safeW = imgW - cw; safeH = imgH - ch;
+                } else if (selMode === 'reverseAlpha') {
+                    btnOK.textContent = '🎯 反向 Alpha 中...';
+                    safeW = imgW; safeH = imgH;
+                    const raTpl = await new Promise(r => chrome.storage.local.get('reverseAlphaTemplate', x => r(x.reverseAlphaTemplate)));
+                    if (!raTpl) throw new Error('未找到反向 Alpha 模板，请先校准');
+                    if (!window.GeminiReverseAlpha) throw new Error('reverseAlpha.js 未加载');
+                    try {
+                        const t0 = performance.now();
+                        const r = window.GeminiReverseAlpha.applyTemplate(bc, bCtx, raTpl);
+                        dlog(`reverse-alpha applied: ${r.applied} px in ${(performance.now() - t0).toFixed(0)}ms`);
+                    } catch (e) {
+                        throw new Error('反向 Alpha 失败: ' + e.message);
+                    }
                 } else if (selMode === 'ai') {
                     btnOK.textContent = '🤖 AI推理准备中...';
                     safeW = imgW; safeH = imgH;
@@ -547,7 +584,7 @@
                 }
                 const fc = document.createElement('canvas'); fc.width = Math.round(fW); fc.height = Math.round(fH);
                 fc.getContext('2d').drawImage(bc, sX, sY, fW, fH, 0, 0, fW, fH);
-                const prefixMap = { penetrate: 'Penetrated_', crop: 'Cropped_', ai: 'AI_Repaired_' };
+                const prefixMap = { penetrate: 'Penetrated_', crop: 'Cropped_', ai: 'AI_Repaired_', reverseAlpha: 'AlphaReversed_' };
                 const prefix = prefixMap[selMode] || 'Processed_';
                 fc.toBlob(async blob => {
                     const ou = URL.createObjectURL(blob);

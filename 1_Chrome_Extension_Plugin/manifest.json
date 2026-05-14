@@ -39,6 +39,7 @@
                 "https://gemini.google.com/*"
             ],
             "js": [
+                "reverseAlpha.js",
                 "content.js"
             ],
             "run_at": "document_start"
