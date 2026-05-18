@@ -160,43 +160,74 @@
     /**
      * 把模板应用到目标图像，擦除水印。
      *
-     * 定位策略：按 rightOffset / bottomOffset 从目标图右下角倒推水印位置，
-     * 假定水印尺寸固定、只是图像整体尺寸变化。
+     * 定位策略：先按 rightOffset / bottomOffset 倒推位置作为初值，
+     * 然后在 ±6px 范围内做"匹配残差最小"搜索，对小尺寸偏差自适应。
      *
      * @param {HTMLCanvasElement} canvas 目标画布（就地修改）
      * @param {CanvasRenderingContext2D} ctx
      * @param {object} template calibrateFromImage 的返回值（alpha 可是 Array 或 Float32Array）
-     * @returns {object} { applied, box } applied: 实际擦除的像素数；box: 擦除区域
+     * @returns {object} { applied, box, offset } applied: 实际擦除的像素数；offset: 实际定位偏移
      */
     function applyTemplate(canvas, ctx, template) {
         const { box, rightOffset, bottomOffset, W_rgb, alpha } = template;
         const alphaArr = alpha instanceof Float32Array ? alpha : Float32Array.from(alpha);
         const imgW = canvas.width, imgH = canvas.height;
 
-        // 目标图上水印的位置：对齐到右下角
-        const tx = imgW - rightOffset - box.w;
-        const ty = imgH - bottomOffset - box.h;
-        if (tx < 0 || ty < 0 || tx + box.w > imgW || ty + box.h > imgH) {
+        // 目标图上水印的初始位置（按右下角偏移倒推）
+        const initX = imgW - rightOffset - box.w;
+        const initY = imgH - bottomOffset - box.h;
+
+        // 在 [-SEARCH, +SEARCH] 范围内寻找最佳偏移：
+        // 评分：以 alpha > 0.3 的像素作为"水印核心"，找它们最亮的位置
+        const SEARCH = 8;
+        const corePoints = [];
+        for (let y = 0; y < box.h; y++) {
+            for (let x = 0; x < box.w; x++) {
+                if (alphaArr[y * box.w + x] >= 0.3) corePoints.push({ x, y });
+            }
+        }
+
+        let bestX = initX, bestY = initY, bestScore = -Infinity;
+        if (corePoints.length > 0 && initX - SEARCH >= 0 && initY - SEARCH >= 0
+            && initX + box.w + SEARCH <= imgW && initY + box.h + SEARCH <= imgH) {
+            const probeX = initX - SEARCH;
+            const probeY = initY - SEARCH;
+            const probeW = box.w + 2 * SEARCH;
+            const probeH = box.h + 2 * SEARCH;
+            const probeData = ctx.getImageData(probeX, probeY, probeW, probeH).data;
+            for (let dy = -SEARCH; dy <= SEARCH; dy++) {
+                for (let dx = -SEARCH; dx <= SEARCH; dx++) {
+                    let score = 0;
+                    for (const cp of corePoints) {
+                        const px = cp.x + SEARCH + dx;
+                        const py = cp.y + SEARCH + dy;
+                        const pi = (py * probeW + px) * 4;
+                        score += probeData[pi] + probeData[pi + 1] + probeData[pi + 2];
+                    }
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestX = initX + dx;
+                        bestY = initY + dy;
+                    }
+                }
+            }
+        }
+        if (bestX < 0 || bestY < 0 || bestX + box.w > imgW || bestY + box.h > imgH) {
             throw new Error(`目标图太小，无法放下水印模板（目标 ${imgW}x${imgH}, 模板 ${box.w}x${box.h}）`);
         }
 
-        const roi = ctx.getImageData(tx, ty, box.w, box.h);
+        const roi = ctx.getImageData(bestX, bestY, box.w, box.h);
         const d = roi.data;
         let applied = 0;
-        const ALPHA_SAT = 0.98;  // α 接近 1 时原像素信息已完全被覆盖，无法恢复
+        const ALPHA_SAT = 0.98;  // α 接近 1 时原像素信息已完全被覆盖
 
         for (let y = 0; y < box.h; y++) {
             for (let x = 0; x < box.w; x++) {
                 const a = alphaArr[y * box.w + x];
-                if (a < 0.02) continue;  // 几乎没有水印，跳过
+                if (a < 0.02) continue;
                 const p = (y * box.w + x) * 4;
-                if (a >= ALPHA_SAT) {
-                    // 饱和区域：用 W_rgb 已完全覆盖，像素信息丢失。先留空，外部可用 LaMa 补
-                    // 这里暂且保持原 output，视觉上最小改动
-                    continue;
-                }
+                if (a >= ALPHA_SAT) continue;
                 const inv = 1 / (1 - a);
-                // original = (output - W_rgb * α) / (1 - α)
                 for (let c = 0; c < 3; c++) {
                     const recovered = (d[p + c] - W_rgb[c] * a) * inv;
                     d[p + c] = Math.max(0, Math.min(255, Math.round(recovered)));
@@ -204,8 +235,12 @@
                 applied++;
             }
         }
-        ctx.putImageData(roi, tx, ty);
-        return { applied, box: { x: tx, y: ty, w: box.w, h: box.h } };
+        ctx.putImageData(roi, bestX, bestY);
+        return {
+            applied,
+            box: { x: bestX, y: bestY, w: box.w, h: box.h },
+            offset: { dx: bestX - initX, dy: bestY - initY }
+        };
     }
 
     window.GeminiReverseAlpha = { calibrateFromImage, applyTemplate };

@@ -484,10 +484,23 @@
                     const raTpl = await new Promise(r => chrome.storage.local.get('reverseAlphaTemplate', x => r(x.reverseAlphaTemplate)));
                     if (!raTpl) throw new Error('未找到反向 Alpha 模板，请先校准');
                     if (!window.GeminiReverseAlpha) throw new Error('reverseAlpha.js 未加载');
+                    // 反向 Alpha 要求图像尺寸与校准图一致；如果用户选了 2x/4x 放大，先回退到 1x 处理
+                    if (gScale !== 1) {
+                        dlog('reverseAlpha: gScale != 1, redrawing canvas at native size');
+                        bc.width = img.naturalWidth;
+                        bc.height = img.naturalHeight;
+                        bCtx.imageSmoothingEnabled = true;
+                        bCtx.imageSmoothingQuality = 'high';
+                        bCtx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
+                        safeW = bc.width; safeH = bc.height;
+                    }
+                    if (bc.width !== raTpl.imgW || bc.height !== raTpl.imgH) {
+                        throw new Error(`图像尺寸 ${bc.width}×${bc.height} 与校准图 ${raTpl.imgW}×${raTpl.imgH} 不一致。请用同分辨率的图重新校准，或切换其他模式。`);
+                    }
                     try {
                         const t0 = performance.now();
                         const r = window.GeminiReverseAlpha.applyTemplate(bc, bCtx, raTpl);
-                        dlog(`reverse-alpha applied: ${r.applied} px in ${(performance.now() - t0).toFixed(0)}ms`);
+                        dlog(`reverse-alpha applied: ${r.applied} px in ${(performance.now() - t0).toFixed(0)}ms, offset=${r.offset.dx},${r.offset.dy}`);
                     } catch (e) {
                         throw new Error('反向 Alpha 失败: ' + e.message);
                     }
